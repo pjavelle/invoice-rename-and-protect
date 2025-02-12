@@ -6,6 +6,43 @@ const execPromise = util.promisify(exec);
 const { PDFDocument } = require('pdf-lib');
 const sharp = require('sharp');
 
+const watermarkFile = path.join(__dirname, 'watermark.png');
+
+async function addPngWatermark(inputFile, outputFile) {
+    try {
+        // Vérifier que le watermark existe
+        if (!fs.existsSync(watermarkFile)) {
+            throw new Error('Le fichier watermark.png est manquant');
+        }
+
+        const pdfBytes = fs.readFileSync(inputFile);
+        const pdfDoc = await PDFDocument.load(pdfBytes);
+
+        const pngBytes = fs.readFileSync(watermarkFile);
+        const pngImage = await pdfDoc.embedPng(pngBytes);
+
+        const pages = pdfDoc.getPages();
+        pages.forEach(page => {
+            const { width, height } = page.getSize();
+            const pngDims = pngImage.scale(0.5);
+
+            page.drawImage(pngImage, {
+                x: (width - pngDims.width) / 2,
+                y: (height - pngDims.height) / 2,
+                width: pngDims.width,
+                height: pngDims.height,
+                opacity: 0.2
+            });
+        });
+
+        const modifiedPdfBytes = await pdfDoc.save();
+        fs.writeFileSync(outputFile, modifiedPdfBytes);
+        console.log(`Watermark ajouté: ${outputFile}`);
+    } catch (error) {
+        console.error('Erreur lors de l\'ajout du watermark:', error);
+        throw error;
+    }
+}
 async function convertPDFToImages(pdfPath, outputDir) {
     try {
         // Créer le dossier de sortie s'il n'existe pas
@@ -170,6 +207,13 @@ async function processImagesDirectories() {
 
 async function processDirectory(inputDir) {
     try {
+        // Créer les dossiers nécessaires s'ils n'existent pas
+        ['./2-watermarks', './3-pdf-to-images', './4-export'].forEach(dir => {
+            if (!fs.existsSync(dir)) {
+                fs.mkdirSync(dir, { recursive: true });
+            }
+        });
+
         // Vérifier que le répertoire d'entrée existe
         if (!fs.existsSync(inputDir)) {
             throw new Error(`Le répertoire ${inputDir} n'existe pas`);
@@ -177,8 +221,6 @@ async function processDirectory(inputDir) {
 
         // Lire le contenu du répertoire
         const files = fs.readdirSync(inputDir);
-
-        // Filtrer pour ne garder que les fichiers PDF
         const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === '.pdf');
 
         if (pdfFiles.length === 0) {
@@ -190,14 +232,21 @@ async function processDirectory(inputDir) {
 
         // Traiter chaque fichier PDF
         for (const pdfFile of pdfFiles) {
-            const pdfPath = path.join(inputDir, pdfFile);
-            const outputDir = path.join('3-pdf-to-images', path.basename(pdfFile, '.pdf') + '_images');
-
             console.log(`\nTraitement de ${pdfFile}...`);
-            await convertPDFToImages(pdfPath, outputDir);
+
+            // 1. Ajouter le watermark
+            const inputPath = path.join(inputDir, pdfFile);
+            const watermarkPath = path.join('./2-watermarks', pdfFile);
+            console.log('Ajout du watermark...');
+            await addPngWatermark(inputPath, watermarkPath);
+
+            // 2. Convertir en images
+            const outputDir = path.join('./3-pdf-to-images', path.basename(pdfFile, '.pdf') + '_images');
+            console.log('Conversion en images...');
+            await convertPDFToImages(watermarkPath, outputDir);
         }
 
-        // Ajouter l'appel à la nouvelle fonction après la conversion en images
+        // 3. Convertir tous les dossiers d'images en PDF
         console.log('\nConversion des dossiers d\'images en PDF...');
         await processImagesDirectories();
 
@@ -207,6 +256,6 @@ async function processDirectory(inputDir) {
     }
 }
 
-// Utilisation du script
-const inputDirectory = './2-watermarks'; // Modifier selon vos besoins
+// Point d'entrée du script
+const inputDirectory = './1-pdfs';  // Dossier contenant les PDF originaux
 processDirectory(inputDirectory);

@@ -14,3 +14,6 @@ config/password.json
 config/update-zip.json
 config/update-emailonacid.json
 config/update-sendbat.json
+*.pdf
+
+*.jpg
