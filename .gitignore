@@ -1,0 +1,16 @@
+/node_modules/
+**/.DS_Store
+.idea/
+_old/
+info/
+livraison/compare/
+.openHtmlFlag
+erreur-compile.txt
+erreur-dimensions.txt
+_sources
+package-lock.json
+*.zip
+config/password.json
+config/update-zip.json
+config/update-emailonacid.json
+config/update-sendbat.json
