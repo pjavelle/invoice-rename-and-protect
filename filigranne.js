@@ -3,6 +3,8 @@ const path = require('path');
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
+const { PDFDocument } = require('pdf-lib');
+const sharp = require('sharp');
 
 async function convertPDFToImages(pdfPath, outputDir) {
     try {
@@ -56,6 +58,116 @@ async function convertPDFToImages(pdfPath, outputDir) {
     }
 }
 
+async function convertImagesToPDF(imagesDir, outputPath) {
+    try {
+        // Vérifier que le dossier d'images existe
+        if (!fs.existsSync(imagesDir)) {
+            throw new Error(`Le répertoire ${imagesDir} n'existe pas`);
+        }
+
+        // Lire les images du dossier
+        const files = fs.readdirSync(imagesDir);
+        const imageFiles = files
+            .filter(f => f.endsWith('.jpg'))
+            .sort((a, b) => {
+                // Trier les fichiers numériquement (page_1.jpg, page_2.jpg, etc.)
+                const numA = parseInt(a.match(/\d+/)[0]);
+                const numB = parseInt(b.match(/\d+/)[0]);
+                return numA - numB;
+            });
+
+        if (imageFiles.length === 0) {
+            throw new Error('Aucune image JPG trouvée dans le dossier');
+        }
+
+        // Créer un nouveau document PDF
+        const pdfDoc = await PDFDocument.create();
+
+        // Ajouter chaque image comme une nouvelle page
+        for (const imageFile of imageFiles) {
+            const imagePath = path.join(imagesDir, imageFile);
+            
+            // Convertir l'image en PNG (pdf-lib supporte mieux le PNG)
+            const imageBuffer = await sharp(imagePath)
+                .png()
+                .toBuffer();
+
+            // Incorporer l'image dans le PDF
+            const image = await pdfDoc.embedPng(imageBuffer);
+            
+            // Créer une nouvelle page avec les dimensions de l'image
+            const page = pdfDoc.addPage([image.width, image.height]);
+            
+            // Dessiner l'image sur la page
+            page.drawImage(image, {
+                x: 0,
+                y: 0,
+                width: image.width,
+                height: image.height,
+            });
+        }
+
+        // Créer le dossier de sortie s'il n'existe pas
+        const outputDir = path.dirname(outputPath);
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        // Sauvegarder le PDF
+        const pdfBytes = await pdfDoc.save();
+        fs.writeFileSync(outputPath, pdfBytes);
+        
+        console.log(`PDF créé avec succès: ${outputPath}`);
+    } catch (error) {
+        console.error('Erreur lors de la conversion en PDF:', error);
+        throw error;
+    }
+}
+
+async function processImagesDirectories() {
+    try {
+        const baseDir = '3-pdf-to-images';
+        const outputDir = '4-export';
+
+        // Vérifier que le répertoire source existe
+        if (!fs.existsSync(baseDir)) {
+            console.log('Aucun dossier d\'images à traiter');
+            return;
+        }
+
+        // Créer le dossier de sortie s'il n'existe pas
+        if (!fs.existsSync(outputDir)) {
+            fs.mkdirSync(outputDir, { recursive: true });
+        }
+
+        // Lire tous les dossiers d'images
+        const directories = fs.readdirSync(baseDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name);
+
+        if (directories.length === 0) {
+            console.log('Aucun dossier d\'images trouvé');
+            return;
+        }
+
+        console.log(`Trouvé ${directories.length} dossiers d'images à convertir`);
+
+        // Traiter chaque dossier
+        for (const dir of directories) {
+            const imagesDir = path.join(baseDir, dir);
+            const outputName = dir.replace('_images', '');
+            const outputPath = path.join(outputDir, `${outputName}.pdf`);
+
+            console.log(`\nConversion du dossier ${dir}...`);
+            await convertImagesToPDF(imagesDir, outputPath);
+        }
+
+        console.log('\nToutes les conversions sont terminées !');
+    } catch (error) {
+        console.error('Erreur lors du traitement des dossiers d\'images:', error);
+    }
+}
+
 async function processDirectory(inputDir) {
     try {
         // Vérifier que le répertoire d'entrée existe
@@ -84,6 +196,10 @@ async function processDirectory(inputDir) {
             console.log(`\nTraitement de ${pdfFile}...`);
             await convertPDFToImages(pdfPath, outputDir);
         }
+
+        // Ajouter l'appel à la nouvelle fonction après la conversion en images
+        console.log('\nConversion des dossiers d\'images en PDF...');
+        await processImagesDirectories();
 
         console.log('\nTraitement terminé !');
     } catch (error) {
