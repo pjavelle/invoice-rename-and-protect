@@ -8,6 +8,20 @@ const sharp = require('sharp');
 
 const watermarkFile = path.join(__dirname, 'watermark.png');
 
+/* Fonctions de log avec couleurs et emoji */
+function logError(msg) {
+  console.error(`\x1b[31m❌ [Erreur] ${msg}\x1b[0m`);
+}
+function logWarning(msg) {
+  console.log(`\x1b[33m🟡 [Info] ${msg}\x1b[0m`);
+}
+function logInfo(msg) {
+  console.log(`\x1b[34m🔵 [Info] ${msg}\x1b[0m`);
+}
+function logSuccess(msg) {
+  console.log(`\x1b[32m🟢 [Succès] ${msg}\x1b[0m`);
+}
+
 async function addPngWatermark(inputFile, outputFile) {
     try {
         // Vérifier que le watermark existe
@@ -31,18 +45,19 @@ async function addPngWatermark(inputFile, outputFile) {
                 y: (height - pngDims.height) / 2,
                 width: pngDims.width,
                 height: pngDims.height,
-                opacity: 0.2
+                opacity: 0.18
             });
         });
 
         const modifiedPdfBytes = await pdfDoc.save();
         fs.writeFileSync(outputFile, modifiedPdfBytes);
-        console.log(`Watermark ajouté: ${outputFile}`);
+        logSuccess(`Watermark ajouté: ${outputFile}`);
     } catch (error) {
-        console.error('Erreur lors de l\'ajout du watermark:', error);
+        logError(`Erreur lors de l'ajout du watermark: ${error.message || error}`);
         throw error;
     }
 }
+
 async function convertPDFToImages(pdfPath, outputDir) {
     try {
         // Créer le dossier de sortie s'il n'existe pas
@@ -55,9 +70,9 @@ async function convertPDFToImages(pdfPath, outputDir) {
         // -r 150 : résolution 150 DPI
         // -q : qualité (défaut est bon)
         const baseFileName = path.join(outputDir, 'page');
-        const cmd = `pdftoppm -jpeg -r 150 "${pdfPath}" "${baseFileName}"`;
+        const cmd = `pdftoppm -jpeg -r 100 "${pdfPath}" "${baseFileName}"`;
 
-        console.log('Conversion en cours...');
+        logInfo('Conversion en cours...');
 
         try {
             await execPromise(cmd);
@@ -74,23 +89,23 @@ async function convertPDFToImages(pdfPath, outputDir) {
                 fs.renameSync(oldPath, newPath);
 
                 const stats = fs.statSync(newPath);
-                console.log(`Page ${index + 1} sauvegardée: ${newPath} (${(stats.size / 1024).toFixed(2)} KB)`);
+                logWarning(`Page ${index + 1} sauvegardée: ${newPath} (${(stats.size / 1024).toFixed(2)} KB)`);
             });
 
-            console.log(`\nConversion terminée! ${jpegFiles.length} pages converties.`);
-            console.log(`Images sauvegardées dans: ${outputDir}`);
+            logSuccess(`Conversion terminée! ${jpegFiles.length} pages converties.`);
+            logSuccess(`Images sauvegardées dans: ${outputDir}`);
         } catch (error) {
-            console.error('Erreur lors de la conversion:', error);
-            if (error.message.includes('command not found')) {
-                console.error('\nIl semble que pdftoppm ne soit pas installé.');
-                console.error('Pour l\'installer sur macOS:');
-                console.error('1. Installer Homebrew si ce n\'est pas déjà fait (https://brew.sh)');
-                console.error('2. Exécuter: brew install poppler');
+            logError(`Erreur lors de la conversion: ${error.message || error}`);
+            if (error.message && error.message.includes('command not found')) {
+                logError('Il semble que pdftoppm ne soit pas installé.');
+                logError('Pour l\'installer sur macOS:');
+                logError('1. Installer Homebrew si ce n\'est pas déjà fait (https://brew.sh)');
+                logError('2. Exécuter: brew install poppler');
             }
             throw error;
         }
     } catch (error) {
-        console.error(`Erreur lors de la conversion de ${pdfPath}:`, error);
+        logError(`Erreur lors de la conversion de ${pdfPath}: ${error.message || error}`);
         throw error;
     }
 }
@@ -126,7 +141,13 @@ async function convertImagesToPDF(imagesDir, outputPath) {
             
             // Convertir l'image en PNG (pdf-lib supporte mieux le PNG)
             const imageBuffer = await sharp(imagePath)
-                .png()
+                .jpeg({ quality: 20, chromaSubsampling: '4:2:0' })
+                .png({
+                    compressionLevel: 9,
+                    quality: 20,
+                    adaptiveFiltering: true,
+                    force: true
+                })
                 .toBuffer();
 
             // Incorporer l'image dans le PDF
@@ -154,9 +175,9 @@ async function convertImagesToPDF(imagesDir, outputPath) {
         const pdfBytes = await pdfDoc.save();
         fs.writeFileSync(outputPath, pdfBytes);
         
-        console.log(`PDF créé avec succès: ${outputPath}`);
+        logSuccess(`PDF créé avec succès: ${outputPath}`);
     } catch (error) {
-        console.error('Erreur lors de la conversion en PDF:', error);
+        logError(`Erreur lors de la conversion en PDF: ${error.message || error}`);
         throw error;
     }
 }
@@ -168,7 +189,7 @@ async function processImagesDirectories() {
 
         // Vérifier que le répertoire source existe
         if (!fs.existsSync(baseDir)) {
-            console.log('Aucun dossier d\'images à traiter');
+            logWarning('Aucun dossier d\'images à traiter');
             return;
         }
 
@@ -183,11 +204,11 @@ async function processImagesDirectories() {
             .map(dirent => dirent.name);
 
         if (directories.length === 0) {
-            console.log('Aucun dossier d\'images trouvé');
+            logWarning('Aucun dossier d\'images trouvé');
             return;
         }
 
-        console.log(`Trouvé ${directories.length} dossiers d'images à convertir`);
+        logInfo(`Trouvé ${directories.length} dossiers d'images à convertir`);
 
         // Traiter chaque dossier
         for (const dir of directories) {
@@ -195,23 +216,26 @@ async function processImagesDirectories() {
             const outputName = dir.replace('_images', '');
             const outputPath = path.join(outputDir, `${outputName}.pdf`);
 
-            console.log(`\nConversion du dossier ${dir}...`);
+            logInfo(`Conversion du dossier ${dir}...`);
             await convertImagesToPDF(imagesDir, outputPath);
         }
 
-        console.log('\nToutes les conversions sont terminées !');
+        logSuccess('Toutes les conversions sont terminées !');
     } catch (error) {
-        console.error('Erreur lors du traitement des dossiers d\'images:', error);
+        logError(`Erreur lors du traitement des dossiers d'images: ${error.message || error}`);
     }
 }
 
 async function processDirectory(inputDir) {
     try {
-        // Créer les dossiers nécessaires s'ils n'existent pas
-        ['./2-watermarks', './3-pdf-to-images', './4-export'].forEach(dir => {
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
+        // Créer ou vider les dossiers nécessaires
+        const dirs = ['./2-watermarks', './3-pdf-to-images', './4-export'];
+        dirs.forEach(dir => {
+            // Pour le dossier "3-pdf-to-images", on supprime son contenu s'il existe.
+            if (dir === './3-pdf-to-images' && fs.existsSync(dir)) {
+                fs.rmSync(dir, { recursive: true, force: true });
             }
+            fs.mkdirSync(dir, { recursive: true });
         });
 
         // Vérifier que le répertoire d'entrée existe
@@ -224,35 +248,35 @@ async function processDirectory(inputDir) {
         const pdfFiles = files.filter(file => path.extname(file).toLowerCase() === '.pdf');
 
         if (pdfFiles.length === 0) {
-            console.log('Aucun fichier PDF trouvé dans le répertoire');
+            logWarning('Aucun fichier PDF trouvé dans le répertoire');
             return;
         }
 
-        console.log(`Trouvé ${pdfFiles.length} fichiers PDF`);
+        logInfo(`Trouvé ${pdfFiles.length} fichiers PDF`);
 
         // Traiter chaque fichier PDF
         for (const pdfFile of pdfFiles) {
-            console.log(`\nTraitement de ${pdfFile}...`);
+            logInfo(`\nTraitement de ${pdfFile}...`);
 
             // 1. Ajouter le watermark
             const inputPath = path.join(inputDir, pdfFile);
             const watermarkPath = path.join('./2-watermarks', pdfFile);
-            console.log('Ajout du watermark...');
+            logInfo('Ajout du watermark...');
             await addPngWatermark(inputPath, watermarkPath);
 
             // 2. Convertir en images
             const outputDir = path.join('./3-pdf-to-images', path.basename(pdfFile, '.pdf') + '_images');
-            console.log('Conversion en images...');
+            logInfo('Conversion en images...');
             await convertPDFToImages(watermarkPath, outputDir);
         }
 
         // 3. Convertir tous les dossiers d'images en PDF
-        console.log('\nConversion des dossiers d\'images en PDF...');
+        logInfo('Conversion des dossiers d\'images en PDF...');
         await processImagesDirectories();
 
-        console.log('\nTraitement terminé !');
+        logSuccess('Traitement terminé !');
     } catch (error) {
-        console.error('Erreur lors du traitement du répertoire:', error);
+        logError(`Erreur lors du traitement du répertoire: ${error.message || error}`);
     }
 }
 
